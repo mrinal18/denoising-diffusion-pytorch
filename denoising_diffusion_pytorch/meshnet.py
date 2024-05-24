@@ -2,6 +2,8 @@
 import torch
 import torch.nn as nn
 import json
+from torch.utils.checkpoint import checkpoint_sequential
+
 
 def construct_layer(dropout_p, bnorm, gelu, **kwargs):
     layers = []
@@ -45,3 +47,25 @@ class MeshNet(nn.Module):
             x = layer(x)
         x = self.final_layer(x)
         return x
+    
+class enMesh_checkpoint(MeshNet):
+    def __init__(self, in_channels, n_classes, channels, config_file, segments=2, fat=None):
+        super(enMesh_checkpoint, self).__init__(in_channels, n_classes, channels, config_file, fat)
+        self.segments = segments
+
+    def train_forward(self, x):
+        x.requires_grad_()
+        x = checkpoint_sequential(self.layers, self.segments, x, preserve_rng_state=False)
+        return x
+
+    def eval_forward(self, x):
+        with torch.inference_mode():
+            x = self.layers(x)
+        return x
+
+    def forward(self, x, t, self_cond=None):
+        if self.training:
+            return self.train_forward(x)
+        else:
+            return self.eval_forward(x)
+
